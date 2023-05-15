@@ -1,0 +1,227 @@
+DECLARE
+--CURSOR PROFESIONES
+    CURSOR CUR_PROFESIONES IS
+        SELECT  COD_PROFESION,
+                NOMBRE_PROFESION,
+                ASIGNACION
+        FROM PROFESION
+        ORDER BY 2 ASC
+        ;
+        
+--TIPO PROFESION
+    TYPE T_PROFESION IS RECORD(
+        CODIGO  PROFESION.COD_PROFESION%TYPE,
+        NOMBRE  PROFESION.NOMBRE_PROFESION%TYPE,
+        ASIGNACION  PROFESION.ASIGNACION%TYPE
+    );
+    
+    
+--CURSOR PROFESIONALES(CON PARAMETRO DE ENTRADA)
+    CURSOR CUR_PROFESIONALES(PARAM_ID_PROFESION NUMBER) IS
+        SELECT  P.NUMRUN_PROF,
+                P.NOMBRE||' '||P.APPATERNO,
+                PF.NOMBRE_PROFESION,
+                P.COD_COMUNA,
+                P.PUNTAJE,
+                P.COD_TPCONTRATO,
+                P.SUELDO
+        FROM PROFESIONAL P LEFT JOIN PROFESION PF ON (P.COD_PROFESION = PF.COD_PROFESION) 
+        WHERE PF.COD_PROFESION = PARAM_ID_PROFESION
+        ;
+                
+--TIPO PROFESIONAL  
+    TYPE T_PROFESIONAL IS RECORD(
+        RUN  PROFESIONAL.NUMRUN_PROF%TYPE,
+        NOMBRE  VARCHAR2(40),
+        NOMBRE_PROFESION   PROFESION.NOMBRE_PROFESION%TYPE,
+        CD_COMUNA  PROFESIONAL.COD_COMUNA%TYPE,
+        PUNTAJE PROFESIONAL.PUNTAJE%TYPE,
+        COD_TIPO_CONTRATO   PROFESIONAL.COD_TPCONTRATO%TYPE,
+        SUELDO  PROFESIONAL.SUELDO%TYPE
+    );
+
+    
+--VARIABLES
+    V_PROFESION   T_PROFESION;
+    V_PROFESIONAL   T_PROFESIONAL;
+    
+    V_NRO_ASESORIAS NUMBER;
+    V_NRO_ASESORIAS_INDIVIDUAL NUMBER;
+    
+    V_HONORARIO_PROFESION NUMBER;
+    V_HONORARIO_INDIVIDUAL NUMBER;
+    
+    V_COMUNA_EMPRESARIAL COMUNA.CODEMP_COMUNA%TYPE;
+    V_ASIGANCION_PROFESION NUMBER;
+    V_ASIG_MOV_INDIVIDUAL NUMBER;
+    
+    V_EVALUACION_PORCENTAJE EVALUACION.PORCENTAJE%TYPE;
+    V_EVALUACION_INDIVIDUAL NUMBER;
+    V_EVALUACION_PROFESION NUMBER;
+    
+    V_INCENTIVO_CONTRATO    TIPO_CONTRATO.INCENTIVO%TYPE;
+    V_INCENTIVO_INDIVIDUAL  NUMBER;
+    V_INCENTIVO_PROFESION   NUMBER;
+    
+    V_ASIG_PROFESION PROFESION.ASIGNACION%TYPE;
+    V_ASIG_PRO_INDIVIDUAL NUMBER;
+    V_ASIG_PRO_PROFESION NUMBER;
+    
+    V_TOTAL_ASIGNACION_INDIVIDUAL NUMBER;
+    V_TOTAL_ASIGNACION_PROFESION NUMBER;
+    
+    V_MES VARCHAR2(4);
+    V_ANNIO VARCHAR2(4);
+BEGIN
+V_MES:= TO_CHAR(SYSDATE,'MM');
+V_ANNIO:= TO_CHAR(SYSDATE,'YYYY');
+DELETE FROM RESUMEN_MES_PROFESION;
+DELETE FROM DETALLE_ASIGNACION_MES;
+
+    OPEN CUR_PROFESIONES;
+        LOOP
+            FETCH CUR_PROFESIONES INTO V_PROFESION;
+            EXIT WHEN CUR_PROFESIONES%NOTFOUND;
+            
+            SELECT  COUNT(ASS.NUMRUN_PROF)
+            INTO    V_NRO_ASESORIAS
+            FROM PROFESIONAL PF LEFT JOIN ASESORIA ASS ON(PF.NUMRUN_PROF = ASS.NUMRUN_PROF)
+            WHERE   PF.COD_PROFESION = V_PROFESION.CODIGO  AND
+                TO_CHAR(ASS.INICIO_ASESORIA,'MM/YYYY') = '06/2021'
+            ;
+            --HONORARIO PROFESION
+            
+            SELECT NVL(SUM(ASS.HONORARIO),0)
+            INTO  V_HONORARIO_PROFESION
+            FROM PROFESIONAL PF LEFT JOIN ASESORIA ASS ON (PF.NUMRUN_PROF = ASS.NUMRUN_PROF)
+            WHERE PF.COD_PROFESION = V_PROFESION.CODIGO  AND
+                TO_CHAR(ASS.INICIO_ASESORIA,'MM/YYYY') = '06/2021'
+            ;
+            
+            V_ASIGANCION_PROFESION:= 0;
+            V_EVALUACION_PROFESION:= 0;
+            V_INCENTIVO_PROFESION:= 0;
+            V_ASIG_PRO_PROFESION:= 0;
+            V_TOTAL_ASIGNACION_PROFESION:= 0;
+            
+            OPEN CUR_PROFESIONALES(V_PROFESION.CODIGO);
+                LOOP
+                    FETCH CUR_PROFESIONALES INTO V_PROFESIONAL;
+                    EXIT WHEN CUR_PROFESIONALES%NOTFOUND;
+                    
+                    SELECT COUNT(NUMRUN_PROF)
+                    INTO V_NRO_ASESORIAS_INDIVIDUAL
+                    FROM ASESORIA
+                    WHERE NUMRUN_PROF = V_PROFESIONAL.RUN AND
+                        TO_CHAR(INICIO_ASESORIA,'MM/YYYY') = '06/2021'
+                    ;
+                    
+                    --HONORARIO POR PROFESIONALES
+                    
+                    SELECT  NVL(SUM(ASS.HONORARIO),0)
+                    INTO V_HONORARIO_INDIVIDUAL
+                    FROM PROFESIONAL PF LEFT JOIN ASESORIA ASS ON (PF.NUMRUN_PROF = ASS.NUMRUN_PROF)
+                    WHERE PF.NUMRUN_PROF = V_PROFESIONAL.RUN AND
+                        TO_CHAR(INICIO_ASESORIA,'MM/YYYY') = '06/2021'
+                    ;
+                    --ASIGNACION MOVILIZACION
+                    
+                    SELECT  CODEMP_COMUNA
+                    INTO  V_COMUNA_EMPRESARIAL
+                    FROM  COMUNA
+                    WHERE   COD_COMUNA = V_PROFESIONAL.CD_COMUNA
+                    ;
+                    
+                    IF V_PROFESIONAL.CD_COMUNA != 81 THEN
+                        IF V_COMUNA_EMPRESARIAL = 10 THEN
+                            V_ASIG_MOV_INDIVIDUAL:= ROUND(V_HONORARIO_INDIVIDUAL * 2 /100);
+                        ELSIF V_COMUNA_EMPRESARIAL = 20 THEN
+                            V_ASIG_MOV_INDIVIDUAL:= ROUND(V_HONORARIO_INDIVIDUAL * 4 /100);
+                        ELSIF V_COMUNA_EMPRESARIAL = 30 THEN
+                            V_ASIG_MOV_INDIVIDUAL:= ROUND(V_HONORARIO_INDIVIDUAL * 5 /100);
+                        ELSIF V_COMUNA_EMPRESARIAL = 40 THEN
+                            V_ASIG_MOV_INDIVIDUAL:= ROUND(V_HONORARIO_INDIVIDUAL * 7 /100);
+                        ELSE
+                            V_ASIG_MOV_INDIVIDUAL:= ROUND(V_HONORARIO_INDIVIDUAL * 9 /100);
+                        END IF;
+                    ELSIF V_PROFESIONAL.CD_COMUNA IS NULL THEN
+                        V_ASIG_MOV_INDIVIDUAL:= 25000;
+                    ELSE
+                        V_ASIG_MOV_INDIVIDUAL:= 0;
+                    END IF;
+                    
+                    V_ASIGANCION_PROFESION:= V_ASIGANCION_PROFESION + V_ASIG_MOV_INDIVIDUAL;
+                    
+                    --ASIGANACION DE EVALUACION
+                   BEGIN 
+                        SELECT  PORCENTAJE
+                        INTO    V_EVALUACION_PORCENTAJE
+                        FROM    EVALUACION
+                        WHERE   V_PROFESIONAL.PUNTAJE BETWEEN EVA_PUNT_MIN AND EVA_PUNT_MAX
+                        ;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            V_EVALUACION_PORCENTAJE:=0;
+                    END;
+                    
+                    V_EVALUACION_INDIVIDUAL:= ROUND(V_HONORARIO_INDIVIDUAL * V_EVALUACION_PORCENTAJE /100);
+                    
+                    V_EVALUACION_PROFESION:= V_EVALUACION_PROFESION + V_EVALUACION_INDIVIDUAL;
+                    
+                    --INCENTIVO POR CONTRATO INDIVIDUAL
+                    
+                    BEGIN
+                        SELECT INCENTIVO
+                        INTO    V_INCENTIVO_CONTRATO
+                        FROM    TIPO_CONTRATO
+                        WHERE   V_PROFESIONAL.COD_TIPO_CONTRATO = COD_TPCONTRATO
+                        ;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            V_INCENTIVO_CONTRATO:= 0;
+                    END;
+                    V_INCENTIVO_INDIVIDUAL:= ROUND(V_HONORARIO_INDIVIDUAL * V_INCENTIVO_CONTRATO / 100);
+                    
+                    V_INCENTIVO_PROFESION:= V_INCENTIVO_PROFESION + V_INCENTIVO_INDIVIDUAL;
+                    
+                    --ASIGNACION POR PROFESION Y SUELDO
+                    
+                    SELECT ASIGNACION
+                    INTO   V_ASIG_PROFESION
+                    FROM    PROFESION
+                    WHERE   COD_PROFESION = V_PROFESION.CODIGO
+                    ;
+                    
+                    V_ASIG_PRO_INDIVIDUAL:= ROUND(V_PROFESIONAL.SUELDO * V_ASIG_PROFESION / 100);
+                    
+                    V_ASIG_PRO_PROFESION:= V_ASIG_PRO_PROFESION + V_ASIG_PRO_INDIVIDUAL;
+                    
+                    --TOTAL ASIGNACION INDIVIDUAL
+                    
+                    V_TOTAL_ASIGNACION_INDIVIDUAL:= V_ASIG_MOV_INDIVIDUAL + V_EVALUACION_INDIVIDUAL + V_INCENTIVO_INDIVIDUAL + V_ASIG_PRO_INDIVIDUAL;
+                    
+                    V_TOTAL_ASIGNACION_PROFESION:= V_TOTAL_ASIGNACION_PROFESION + V_TOTAL_ASIGNACION_INDIVIDUAL;
+                    
+                    DBMS_OUTPUT.PUT_LINE(' - '||V_MES||' | '||V_ANNIO||' | '||V_PROFESIONAL.RUN||' | '||V_PROFESIONAL.NOMBRE||' | '||V_PROFESIONAL.NOMBRE_PROFESION||' | '||V_NRO_ASESORIAS_INDIVIDUAL||' | '||V_HONORARIO_INDIVIDUAL||' | '||V_ASIG_MOV_INDIVIDUAL||' | '||V_EVALUACION_INDIVIDUAL||' | '||V_INCENTIVO_INDIVIDUAL||' | '||V_ASIG_PRO_INDIVIDUAL||' | '||V_TOTAL_ASIGNACION_INDIVIDUAL);
+                END LOOP;
+            CLOSE CUR_PROFESIONALES;
+            
+            INSERT INTO RESUMEN_MES_PROFESION VALUES(
+                202305,
+                V_PROFESION.NOMBRE,
+                V_NRO_ASESORIAS,
+                V_HONORARIO_PROFESION,
+                V_ASIGANCION_PROFESION,
+                V_EVALUACION_PROFESION,
+                V_INCENTIVO_PROFESION,
+                V_ASIG_PRO_PROFESION,
+                V_TOTAL_ASIGNACION_PROFESION
+            );
+            
+            DBMS_OUTPUT.PUT_LINE(V_ANNIO||V_MES||' | '||V_PROFESION.NOMBRE||' | '||V_NRO_ASESORIAS||' | '||V_HONORARIO_PROFESION||' | '||V_ASIGANCION_PROFESION||' | '||V_EVALUACION_PROFESION||' | '||V_INCENTIVO_PROFESION||' | '||V_ASIG_PRO_PROFESION||' | '||V_TOTAL_ASIGNACION_PROFESION);
+            
+        END LOOP;
+    CLOSE CUR_PROFESIONES;
+
+END
+;  
